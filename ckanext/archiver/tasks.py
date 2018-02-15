@@ -23,6 +23,10 @@ from ckan.lib import uploader
 from ckan import plugins as p
 from ckanext.archiver import interfaces as archiver_interfaces
 
+import logging
+
+log = logging.getLogger(__name__)
+
 toolkit = p.toolkit
 
 ALLOWED_SCHEMES = set(('http', 'https', 'ftp'))
@@ -110,7 +114,6 @@ def update_resource(ckan_ini_filepath, resource_id, queue='bulk'):
     '''
     load_config(ckan_ini_filepath)
 
-    log = update_resource.get_logger()
     log.info('Starting update_resource task: res_id=%r queue=%s', resource_id, queue)
 
     # HACK because of race condition #1481
@@ -137,7 +140,6 @@ def update_package(ckan_ini_filepath, package_id, queue='bulk'):
     '''
     load_config(ckan_ini_filepath)
 
-    log = update_package.get_logger()
     log.info('Starting update_package task: package_id=%r queue=%s',
              package_id, queue)
 
@@ -145,7 +147,7 @@ def update_package(ckan_ini_filepath, package_id, queue='bulk'):
     # Also put try/except around it is easier to monitor ckan's log rather than
     # celery's task status.
     try:
-        _update_package(package_id, queue, log)
+        _update_package(ckan_ini_filepath, package_id, queue, log)
     except Exception, e:
         if os.environ.get('DEBUG'):
             raise
@@ -156,7 +158,7 @@ def update_package(ckan_ini_filepath, package_id, queue='bulk'):
         raise
 
 
-def _update_package(package_id, queue, log):
+def _update_package(ckan_ini_filepath, package_id, queue, log):
     from ckan import model
 
     get_action = toolkit.get_action
@@ -167,7 +169,7 @@ def _update_package(package_id, queue, log):
 
     for resource in package['resources']:
         resource_id = resource['id']
-        res = _update_resource(resource_id, queue, log)
+        res = _update_resource(ckan_ini_filepath, resource_id, queue, log)
         if res:
             num_archived += 1
 
@@ -200,7 +202,7 @@ def _update_search_index(package_id, log):
     log.info('Search indexed %s', package['name'])
 
 
-def _update_resource(resource_id, queue, log):
+def _update_resource(ckan_ini_filepath, resource_id, queue, log):
     """
     Link check and archive the given resource.
     If successful, updates the archival table with the cache_url & hash etc.
@@ -222,6 +224,8 @@ def _update_resource(resource_id, queue, log):
         }
     If not successful, returns None.
     """
+    load_config(ckan_ini_filepath)
+
     from ckan import model
     from pylons import config
     from ckan.plugins import toolkit
@@ -399,7 +403,6 @@ def download(context, resource, url_timeout=30,
     '''
     from ckanext.archiver import default_settings as settings
     from pylons import config
-    log = update_resource.get_logger()
 
     if max_content_length == 'default':
         max_content_length = settings.MAX_CONTENT_LENGTH
@@ -850,7 +853,6 @@ def api_request(context, resource):
     and get a valid response. If it does it returns the response, otherwise
     Archives the response and stores what sort of request elicited it.
     '''
-    log = update_resource.get_logger()
     # 'resource' holds the results of the download and will get saved. Only if
     # an API request is successful do we want to save the details of it.
     # However download() gets altered for these API requests. So only give
@@ -904,7 +906,6 @@ def clean():
     """
     Remove all archived resources.
     """
-    log = clean.get_logger()
     log.error("clean task not implemented yet")
 
 
@@ -925,7 +926,6 @@ def link_checker(context, data):
 
     Returns a json dict of the headers of the request
     """
-    log = update_resource.get_logger()
     data = json.loads(data)
     url_timeout = data.get('url_timeout', 30)
 
@@ -966,5 +966,3 @@ def link_checker(context, data):
                 (res.status_code, res.reason)
             raise LinkHeadRequestError(error_message)
     return json.dumps(dict(headers))
-
-
